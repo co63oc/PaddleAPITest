@@ -1,1 +1,0 @@
-python engine.py --paddle_only=True --api_config_file=tester/api_config/big_and_0size/api_config_0sizetensor_paddleonly.txt --filter=paddle.cummax
