@@ -16,6 +16,10 @@ def main():
         default="",
     )
     parser.add_argument(
+        '--filter',
+        default="",
+    )    
+    parser.add_argument(
         '--api_config',
         default="",
     )
@@ -69,7 +73,11 @@ def main():
     elif options.api_config_file != "":
         finish_configs = read_log("checkpoint")
         with open(options.api_config_file, "r") as f:
-            api_configs = set(line.strip() for line in f if line.strip())
+            filter = options.filter
+            if filter:
+                api_configs = set(line.strip() for line in f if line.strip() and filter in line)   
+            else:
+                api_configs = set(line.strip() for line in f if line.strip())
         api_configs = api_configs - finish_configs
         api_configs = sorted(api_configs)
         for api_config_str in api_configs:
