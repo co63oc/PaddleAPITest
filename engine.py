@@ -74,8 +74,14 @@ def main():
         finish_configs = read_log("checkpoint")
         with open(options.api_config_file, "r") as f:
             filter = options.filter
+            def check_filter(line, filter):
+                filter_list = filter.split(",")
+                for i in filter_list:
+                    if i in line:
+                        return True
+                return False
             if filter:
-                api_configs = set(line.strip() for line in f if line.strip() and filter in line)   
+                api_configs = set(line.strip() for line in f if line.strip() and check_filter(line, filter))   
             else:
                 api_configs = set(line.strip() for line in f if line.strip())
         api_configs = api_configs - finish_configs
