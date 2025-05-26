@@ -51,6 +51,11 @@ class APITestAccuracy(APITestBase):
             write_to_log("paddle_error", self.api_config.config)
             return
 
+        char_list = ".,()[] \"="
+        config_name = self.api_config.config
+        for ch in char_list:
+            config_name = config_name.replace(ch, "_")
+        config_name = ""
         try:
             device = torch.device("cuda:0")
             torch.set_default_device(device)
@@ -69,6 +74,37 @@ class APITestAccuracy(APITestBase):
                 "result": None,
                 **self.torch_kwargs,
             }
+            code = convert_result.code
+            code_out = "import torch\nfrom collections import OrderedDict\n"
+            code_out = code_out + "def tensor_by_size(*args, **kwargs):\n"
+            code_out = code_out + "    return torch.randn(kwargs['size'], dtype=kwargs['dtype'])\n"
+            code_out = code_out + ("args = " + str(self.torch_args)) + "\n"
+            code_out = code_out + ("kwargs = " +  str(self.torch_kwargs)).replace("tensor(", "tensor_by_size(") + "\n"
+            code_out = code_out + ("result = " +  str(None)) + "\n"
+            for k, v in self.torch_kwargs.items():
+                code_out = code_out + f'{k} = {v}'.replace("tensor(", "tensor_by_size(") + "\n"
+            code_out = code_out + "# preprocess\n"
+            for i in code.preprocess:
+                code_out = code_out + i + "\n"
+            code_out = code_out + "# core\n"
+            for i in code.core:
+                code_out = code_out + i + "\n"
+            code_out = code_out + "# postprocess\n"
+            for i in code.postprocess:
+                code_out = code_out + i + "\n"
+            code_out = code_out + "print(result)\n"
+            with open('tmp/' + config_name + '_torch_out.py', 'w+') as f:
+                f.write(code_out)
+
+            code_output = "import paddle\n"
+            code_output = code_output + "def TensorBySize(*args):\n"
+            code_output = code_output + "    return paddle.randn(args[0]).astype(args[1])\n"
+            code_output = code_output + "result = " + \
+                    str(self.api_config).replace("Tensor(", "TensorBySize(") \
+                    .replace("paddle.Tensor", "paddle") + "\n" \
+                        + "print(result)\n"
+            with open('tmp/' + config_name + '_paddle_out.py', 'w+') as f:
+                f.write(code_output)
 
             # convert_result.is_torch_corresponding 为 True 时代表有对应的 Torch API
             # 执行 *_compiled 编译好的代码速度更快
