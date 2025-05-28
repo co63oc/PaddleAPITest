@@ -287,6 +287,10 @@ def main():
     )
     parser.add_argument("--api_config", default="")
     parser.add_argument(
+        '--filter',
+        default="",
+    )        
+    parser.add_argument(
         "--paddle_only",
         default=False,
     )
@@ -396,7 +400,17 @@ def main():
         for config_file in config_files:
             try:
                 with open(config_file, "r") as f:
-                    lines = [line.strip() for line in f if line.strip()]
+                    filter = options.filter
+                    def check_filter(line, filter):
+                        filter_list = filter.split(",")
+                        for i in filter_list:
+                            if i in line:
+                                return True
+                        return False
+                    if filter:
+                        lines = [line.strip() for line in f if line.strip() and check_filter(line, filter)]   
+                    else:
+                        lines = [line.strip() for line in f if line.strip()]
                     api_config_count += len(lines)
                     api_configs.update(lines)
             except FileNotFoundError:
