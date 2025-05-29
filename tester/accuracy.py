@@ -77,6 +77,8 @@ class APITestAccuracy(APITestBase):
             code = convert_result.code
             code_out = "import torch\nfrom collections import OrderedDict\n"
             code_out = code_out + "def tensor_by_size(*args, **kwargs):\n"
+            code_out = code_out + "    if 'size' not in kwargs:\n"
+            code_out = code_out + "        return torch.tensor(args[0], dtype=kwargs['dtype'])\n"
             code_out = code_out + "    return torch.randn(kwargs['size'], dtype=kwargs['dtype'])\n"
             code_out = code_out + ("args = " + str(self.torch_args)) + "\n"
             code_out = code_out + ("kwargs = " +  str(self.torch_kwargs)).replace("tensor(", "tensor_by_size(") + "\n"
