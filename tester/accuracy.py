@@ -67,6 +67,16 @@ class APITestAccuracy(APITestBase):
             # 以下代码等价于:
             # torch_output = Paddle2TorchConverter.execute(convert_result, self.torch_args, self.torch_kwargs)
             # 准备执行环境，将参数(torch tensors)直接映射至locals
+        #     self.torch_kwargs['arr'] = torch.tensor([[-15338,  12871,  41045, -19020,   1958],
+        # [ 31431,  38442,  56837,   5480,  -5097]], dtype=torch.int32)
+        #     self.torch_kwargs['indices'] = torch.tensor([[0, 0, 3],
+        # [4, 4, 4]])
+        #     self.torch_kwargs['values'] = torch.tensor([[ 41056,  27249,  17091],
+        # [-47152, -56562,  25629]], dtype=torch.int32)
+        #     self.torch_kwargs['indices'] = torch.tensor([[0, 0],
+        # ])
+        #     self.torch_kwargs['values'] = torch.tensor([[ 27249, 1],
+        # ], dtype=torch.int32)
             exec_globals = {"torch": torch}
             exec_locals = {
                 "args": self.torch_args,
@@ -74,11 +84,15 @@ class APITestAccuracy(APITestBase):
                 "result": None,
                 **self.torch_kwargs,
             }
+            # print(self.torch_args, self.torch_kwargs)
             code = convert_result.code
             code_out = "import torch\nfrom collections import OrderedDict\n"
             code_out = code_out + "def tensor_by_size(*args, **kwargs):\n"
             code_out = code_out + "    if 'size' not in kwargs:\n"
-            code_out = code_out + "        return torch.tensor(args[0], dtype=kwargs['dtype'])\n"
+            code_out = code_out + "        if 'dtype' not in kwargs:\n"
+            code_out = code_out + "            return torch.tensor(args[0])\n"
+            code_out = code_out + "        else:\n"            
+            code_out = code_out + "            return torch.tensor(args[0], dtype=kwargs['dtype'])\n"
             code_out = code_out + "    return torch.randn(kwargs['size'], dtype=kwargs['dtype'])\n"
             code_out = code_out + ("args = " + str(self.torch_args)) + "\n"
             code_out = code_out + ("kwargs = " +  str(self.torch_kwargs)).replace("tensor(", "tensor_by_size(") + "\n"
@@ -98,12 +112,37 @@ class APITestAccuracy(APITestBase):
             with open('tmp/' + config_name + '_torch_out.py', 'w+') as f:
                 f.write(code_out)
 
+            print(self.gen_paddle_input())
+            # print(self.paddle_args, self.paddle_kwargs)
             code_output = "import paddle\n"
-            code_output = code_output + "def TensorBySize(*args):\n"
-            code_output = code_output + "    return paddle.randn(args[0]).astype(args[1])\n"
+            code_output = code_output + "def tensor_by_size(*args, **kwargs):\n"
+            code_output = code_output + "    if 'size' not in kwargs:\n"
+            code_output = code_output + "        if 'dtype' not in kwargs:\n"
+            code_output = code_output + "            return paddle.to_tensor(args[0])\n"
+            code_output = code_output + "        else:\n"            
+            code_output = code_output + "            return paddle.to_tensor(args[0], dtype=kwargs['dtype'])\n"
+            code_output = code_output + "    return paddle.randn(kwargs['size'], dtype=kwargs['dtype'])\n"
+            code_output = code_output + "args = []\nkwargs = {}\n"
+            for i in self.paddle_args:
+                if isinstance(i, paddle.Tensor):
+                    code_output = code_output + "args.append(" + \
+                        str(torch.tensor(i.numpy())).replace("tensor(", "tensor_by_size(") \
+                        .replace("torch.", "paddle.") \
+                    + ")\n"
+                else:
+                    code_output = code_output + "args.append(" + str(i) + ")\n"
+            
+            for k, v in self.paddle_kwargs.items():
+                if isinstance(v, paddle.Tensor):
+                    code_output = code_output + "kwargs['" + k + "']=" \
+                    + str(torch.tensor(i.numpy())).replace("tensor(", "tensor_by_size(") \
+                        .replace("torch.", "paddle.") \
+                    + "\n"
+                else:
+                    code_output = code_output + "kwargs['" + k + "']=" + str(v) + "\n"
             code_output = code_output + "result = " + \
-                    str(self.api_config).replace("Tensor(", "TensorBySize(") \
-                    .replace("paddle.Tensor", "paddle") + "\n" \
+                    str(self.api_config.api_name) \
+                    .replace("paddle.Tensor", "paddle") + "(*args, **kwargs)\n" \
                         + "print(result)\n"
             with open('tmp/' + config_name + '_paddle_out.py', 'w+') as f:
                 f.write(code_output)
@@ -111,6 +150,7 @@ class APITestAccuracy(APITestBase):
             # convert_result.is_torch_corresponding 为 True 时代表有对应的 Torch API
             # 执行 *_compiled 编译好的代码速度更快
             code = convert_result.code
+
             if code.preprocess_compiled:
                 exec(code.preprocess_compiled, exec_globals, exec_locals)
 
