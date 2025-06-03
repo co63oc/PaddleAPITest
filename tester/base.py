@@ -8,103 +8,158 @@ import torch
 from .api_config import USE_CACHED_NUMPY, TensorConfig, cached_numpy
 
 # Todo: check paddle.linalg.pca_lowrank @cangtianhuang
-not_support_api = ["paddle.Tensor.coalesce",
- "paddle.Tensor.is_coalesced",
- "paddle.Tensor.index_put",
- "paddle.Tensor.index_sample",
- "paddle.linalg.pca_lowrank"
- ]
+not_support_api = frozenset(
+    [
+        "paddle.Tensor.coalesce",
+        "paddle.Tensor.is_coalesced",
+        "paddle.Tensor.index_put",
+        "paddle.Tensor.index_sample",
+        "paddle.linalg.pca_lowrank",
+    ]
+)
 
-rand_apis = [
-    "paddle.bernoulli",
-    "paddle.bernoulli_",
-    "paddle.binomial",
-    "paddle.cauchy_",
-    "paddle.geometric_",
-    "paddle.log_normal",
-    "paddle.log_normal_",
-    "paddle.multinomial",
-    "paddle.normal",
-    "paddle.normal_",
-    "paddle.poisson",
-    "paddle.rand",
-    "paddle.randn",
-    "paddle.randint",
-    "paddle.randint_like",
-    "paddle.randperm",
-    "paddle.uniform",
-    "paddle.standard_gamma",
-    "paddle.standard_normal", 
-    "paddle.Tensor.bernoulli_",
-    "paddle.Tensor.cauchy_",
-    "paddle.Tensor.exponential_",
-    "paddle.Tensor.geometric_",
-    "paddle.Tensor.log_normal_",
-    "paddle.Tensor.multinomial",
-    "paddle.Tensor.normal_",
-    "paddle.Tensor.uniform_",
-    "paddle.empty",
-    "paddle.empty_like",
-    "paddle.Tensor.__dir__",
-]
+# TODO: check all rand calc/create api (i.e. rand_apis and stochastic_behavior_apis list) and move config to accuracy_error.txt or random_calculation.txt / random_creation.txt. Eliminate configs in fresh report. API level skipping check is breaking down to config level txt managing. @Cutelemon6
+rand_apis = frozenset(
+    [
+        "paddle.bernoulli_",
+        "paddle.binomial",
+        "paddle.cauchy_",
+        "paddle.geometric_",
+        "paddle.log_normal",
+        "paddle.log_normal_",
+        "paddle.multinomial",
+        "paddle.normal",
+        "paddle.normal_",
+        "paddle.poisson",
+        "paddle.rand",
+        "paddle.randn",
+        "paddle.randint",
+        "paddle.randint_like",
+        "paddle.randperm",
+        "paddle.uniform",
+        "paddle.standard_gamma",
+        "paddle.standard_normal",
+        "paddle.Tensor.bernoulli_",
+        "paddle.Tensor.cauchy_",
+        "paddle.Tensor.exponential_",
+        "paddle.Tensor.geometric_",
+        "paddle.Tensor.log_normal_",
+        "paddle.Tensor.multinomial",
+        "paddle.Tensor.normal_",
+        "paddle.Tensor.uniform_",
+        "paddle.empty",
+        "paddle.empty_like",
+        "paddle.Tensor.__dir__",
+    ]
+)
 
-stochastic_behavior_apis =[
-    "paddle.Tensor.top_p_sampling", 
-    "paddle.incubate.nn.functional.fused_bias_dropout_residual_layer_norm",
-    "paddle.incubate.nn.functional.fused_dropout_add",
-    "paddle.incubate.nn.functional.moe_dispatch",
-    "paddle.nn.functional.alpha_dropout", 
-    "paddle.nn.functional.fused_feedforward",
-    "paddle.nn.functional.dropout",
-    "paddle.nn.functional.dropout2d",
-    "paddle.nn.functional.dropout3d",
-    "paddle.nn.functional.feature_alpha_dropout",
-]
+stochastic_behavior_apis = frozenset(
+    [
+        "paddle.Tensor.top_p_sampling",
+        # "paddle.incubate.nn.functional.fused_bias_dropout_residual_layer_norm",
+        "paddle.incubate.nn.functional.fused_dropout_add",
+        "paddle.incubate.nn.functional.moe_dispatch",
+        "paddle.nn.functional.alpha_dropout",
+        # "paddle.nn.functional.fused_feedforward",
+        "paddle.nn.functional.dropout",
+        "paddle.nn.functional.dropout2d",
+        "paddle.nn.functional.dropout3d",
+        "paddle.nn.functional.feature_alpha_dropout",
+        "paddle.incubate.nn.functional.fused_multi_head_attention",
+        "paddle.nn.functional.scaled_dot_product_attention",
+    ]
+)
 
-single_op_no_signature_apis = ["__eq__", "__ge__", "__gt__", "__le__", "__lt__", "__add__", "__div__", "__floordiv__", "__matmul__", "__mod__", "__ne__", "__pow__", "__radd__", "__rmatmul__", "__rmod__", "__rmul__", "__rpow__", "__rsub__", "__rtruediv__", "__truediv__", "__mul__", "__sub__"]
+single_op_no_signature_apis = frozenset(
+    [
+        "__eq__",
+        "__ge__",
+        "__gt__",
+        "__le__",
+        "__lt__",
+        "__add__",
+        "__div__",
+        "__floordiv__",
+        "__matmul__",
+        "__mod__",
+        "__ne__",
+        "__pow__",
+        "__radd__",
+        "__rmatmul__",
+        "__rmod__",
+        "__rmul__",
+        "__rpow__",
+        "__rsub__",
+        "__rtruediv__",
+        "__truediv__",
+        "__mul__",
+        "__sub__",
+    ]
+)
 
 no_signature_api_mappings = {
     f"paddle.Tensor.{method}": {
         "self": lambda cfg: get_arg(cfg, 0, "self"),
-        "y": lambda cfg: get_arg(cfg, 1, "y")
+        "y": lambda cfg: get_arg(cfg, 1, "y"),
     }
     for method in single_op_no_signature_apis
 }
 
-# Todo: check paddle.prod paddle.cumprod @cangtianhuang
-int_too_big_fail_api = [
-    "paddle.Tensor.cumprod",
-    "paddle.pow",
-    "paddle.Tensor.pow",
-    "paddle.Tensor.lcm",
-    "paddle.Tensor.prod",
-]
 
-handle_axes_api = [
-    "paddle.mean",
-    "paddle.max",
-    "paddle.min",
-    "paddle.sum",
-    "paddle.prod",
-]
+handle_axes_api = frozenset(
+    [
+        "paddle.mean",
+        "paddle.max",
+        "paddle.min",
+        "paddle.sum",
+        "paddle.prod",
+    ]
+)
+
+# All configs that report dtype diff when not in not_check_dtype list
+# should be moved to tester/api_config/5_accuracy/dtype_diff.txt
+not_check_dtype = frozenset(
+    [
+        "paddle.where",
+        "paddle.nn.functional.one_hot",
+        "paddle.frexp",
+        "paddle.Tensor.frexp",
+        "paddle.floor",
+        "paddle.Tensor.cumsum",
+        "paddle.add",
+        "paddle.add_n",
+        "paddle.cummax",
+        "paddle.cummin",
+        "paddle.cumsum",
+        "paddle.nn.functional.adaptive_max_pool1d",
+        "paddle.nn.functional.adaptive_max_pool2d",
+        "paddle.nn.functional.adaptive_max_pool3d",
+        "paddle.nn.functional.max_pool1d",
+        "paddle.nn.functional.max_pool2d",
+        "paddle.nn.functional.max_pool3d",
+        "paddle.copysign",
+        "paddle.cumprod",
+        "paddle.incubate.nn.functional.fused_layer_norm",
+    ]
+)
 
 
 class APITestBase:
     def __init__(self, api_config):
         self.api_config = api_config
         self.outputs_grad_numpy = []
+        torch.set_num_threads(20)
+        torch.set_printoptions(threshold=100)
 
-    def need_skip(self):
+    def need_skip(self, paddle_only=False):
         # not support
         if "sparse" in self.api_config.api_name:
             return True
         if self.api_config.api_name in not_support_api:
             return True
-        if self.api_config.api_name in rand_apis:
+        if not paddle_only and self.api_config.api_name in rand_apis:
             return True
-        if self.api_config.api_name in stochastic_behavior_apis:
-            return True
-        if self.api_config.api_name in int_too_big_fail_api:
+        if not paddle_only and self.api_config.api_name in stochastic_behavior_apis:
             return True
         for i in range(len(self.api_config.args)):
             if isinstance(self.api_config.args[i], TensorConfig):
@@ -169,7 +224,7 @@ class APITestBase:
         #         return True
         # return True
 
-        if not self.is_forward_only() and not (self.api_config.api_name == "paddle.assign" and len(self.paddle_args) and isinstance(self.paddle_args[0], list)) and not (self.api_config.api_name == "paddle.assign" and len(self.paddle_args) > 1 and self.paddle_args[1] is not None):
+        if not self.is_forward_only() and not (self.api_config.api_name == "paddle.assign" and len(self.paddle_args_config) and isinstance(self.paddle_args_config[0], list)) and not (self.api_config.api_name == "paddle.assign" and len(self.paddle_args_config) > 1 and self.paddle_args_config[1] is not None):
             if len(self.api_config.args) > 0 and isinstance(self.api_config.args[0], TensorConfig):
                 dtype = self.api_config.args[0].dtype
                 if dtype in ['float32', 'float64', 'float16', 'complex64', 'complex128', 'bfloat16']:
@@ -204,7 +259,7 @@ class APITestBase:
             paddle_sig = inspect.signature(self.paddle_api)
             paddle_bound_args = paddle_sig.bind(*self.api_config.args, **self.api_config.kwargs)
             paddle_args_dict = paddle_bound_args.arguments
-            # fix paddle.arange wrong binding 
+            # fix paddle.arange wrong binding
             if self.api_config.api_name == "paddle.arange":
                 # if end is not provided, use the 'start' kwargs as end
                 if "end" not in paddle_args_dict:
@@ -385,11 +440,11 @@ class APITestBase:
         
         be sure to call gen_numpy_input() before use gen_paddle_input() since gen_paddle_input() do not pass index or key to get_paddle_tensor() or get_numpy_tensor() while gen_numpy_input() pass.
         """
-        
+
         self.paddle_args = []
         self.paddle_kwargs = collections.OrderedDict()
         self.paddle_merged_kwargs = collections.OrderedDict()
-        
+
         for arg_config in self.paddle_args_config:
             if isinstance(arg_config, TensorConfig):
                 self.paddle_args.append(arg_config.get_paddle_tensor(self.api_config))
@@ -439,7 +494,6 @@ class APITestBase:
             (k, _deep_copy(v)) for k, v in self.paddle_kwargs.items()
         )
         return args, kwargs
-
 
     def get_paddle_input_list(self):
         result = []
@@ -561,11 +615,11 @@ class APITestBase:
 
     def convert_dtype_to_torch_type(self, dtype):
         # for python built-in types, mappings are int -> torch.int64, bool -> torch.bool, float -> torch.float64, complex -> torch.complex128, None -> None
-        if dtype in ['float32', 'float', numpy.float32, paddle.float32, paddle.base.libpaddle.VarDesc.VarType.FP32]:
+        if dtype in ['float32', numpy.float32, paddle.float32, paddle.base.libpaddle.VarDesc.VarType.FP32]:
             return torch.float32
         elif dtype in ['float16', numpy.float16, paddle.float16, paddle.base.libpaddle.VarDesc.VarType.FP16]:
             return torch.float16
-        elif dtype in ['float64', 'double', numpy.float64, paddle.float64, paddle.base.libpaddle.VarDesc.VarType.FP64, float]:
+        elif dtype in ['float64', 'float', 'double', numpy.float64, paddle.float64, paddle.base.libpaddle.VarDesc.VarType.FP64, float]:
             return torch.float64
         elif dtype in ['int16', numpy.int16, paddle.int16, paddle.base.libpaddle.VarDesc.VarType.INT16]:
             return torch.int16
@@ -573,7 +627,7 @@ class APITestBase:
             return torch.int8
         elif dtype in ['bool', numpy.bool_, paddle.bool, paddle.base.libpaddle.VarDesc.VarType.BOOL, bool]:
             return torch.bool
-        elif dtype in ['bfloat16', numpy.uint16, paddle.bfloat16, paddle.base.libpaddle.VarDesc.VarType.BF16]:
+        elif dtype in ['bfloat16','uint16', numpy.uint16, paddle.bfloat16, paddle.base.libpaddle.VarDesc.VarType.BF16]:
             return torch.bfloat16
         elif dtype in ['uint8', numpy.uint8, paddle.uint8, paddle.base.libpaddle.VarDesc.VarType.UINT8]:
             return torch.uint8
@@ -725,7 +779,6 @@ class APITestBase:
         )
         return args, kwargs
 
-
     def _handle_list_or_tuple_torch(self, config_items, is_tuple=False):
         """处理 list 或 tuple """
         tmp = []
@@ -749,7 +802,7 @@ class APITestBase:
         
         be sure to call gen_numpy_input() before use gen_torch_input() since gen_torch_input() do not pass index or key to get_torch_tensor() or get_numpy_tensor() while gen_numpy_input() pass.
         """
-        
+
         self.torch_args = []
         self.torch_kwargs = collections.OrderedDict()
         for arg_config in self.torch_args_config:
@@ -825,6 +878,47 @@ class APITestBase:
             #     )
             # ),
         )
+
+    def torch_assert_accuracy(self, paddle_tensor, torch_tensor, atol, rtol):
+        is_check_dtype = self.api_config.api_name not in not_check_dtype
+
+        paddle_tensor = paddle_tensor.cpu().detach()
+        torch_tensor = torch_tensor.cpu().detach()
+
+        paddle_dlpack = paddle.utils.dlpack.to_dlpack(paddle_tensor)
+        converted_paddle_tensor = torch.utils.dlpack.from_dlpack(paddle_dlpack)
+
+        def error_msg(msg):
+            return (
+                f"Not equal to tolerance rtol={rtol}, atol={atol}\n"
+                f"{msg}\n"
+                f"ACTUAL: (shape={converted_paddle_tensor.shape}, dtype={converted_paddle_tensor.dtype})\n"
+                f"{converted_paddle_tensor}\n"
+                f"DESIRED: (shape={torch_tensor.shape}, dtype={torch_tensor.dtype})\n"
+                f"{torch_tensor}"
+            )
+
+        try:
+            torch.testing.assert_close(
+                converted_paddle_tensor,
+                torch_tensor,
+                rtol=rtol,
+                atol=atol,
+                equal_nan=True,
+                check_dtype=is_check_dtype,
+                msg=error_msg,
+            )
+        except Exception as e:
+            if "Comparing" in str(e):
+                self.np_assert_accuracy(
+                    paddle_tensor.numpy(),
+                    torch_tensor.numpy(),
+                    atol,
+                    rtol,
+                    self.api_config,
+                )
+            else:
+                raise
 
     def test(self):
         pass

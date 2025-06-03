@@ -1,5 +1,6 @@
 import argparse
 import errno
+import gc
 import math
 import os
 import signal
@@ -11,7 +12,7 @@ from multiprocessing import Lock, Manager, cpu_count, set_start_method
 from typing import TYPE_CHECKING
 
 import pynvml
-from pebble import ProcessPool
+from pebble import ProcessExpired, ProcessPool
 
 if TYPE_CHECKING:
     from tester import (
@@ -20,9 +21,10 @@ if TYPE_CHECKING:
         APITestCINNVSDygraph,
         APITestPaddleOnly,
     )
+    import torch
+    import paddle
 
-from tester.api_config.log_writer import (aggregate_logs, print_log_info,
-                                          read_log, set_engineV2, write_to_log)
+from tester.api_config.log_writer import *
 
 
 def cleanup(pool):
@@ -39,29 +41,30 @@ def cleanup(pool):
 
 def estimate_timeout(api_config) -> float:
     """Estimate timeout based on tensor size in APIConfig."""
-    TIMEOUT_STEPS = (
-        # (1e4, 10),
-        # (1e5, 30),
-        (1e6, 90),
-        (1e7, 300),
-        (1e8, 1800),
-        (float("inf"), 3600),
-    )
-    try:
-        api_config = APIConfig(api_config)
-        first = None
-        if api_config.args:
-            first = api_config.args[0]
-        elif api_config.kwargs:
-            first = next(iter(api_config.kwargs.values()))
-        if first is not None and hasattr(first, "shape"):
-            total_elements = math.prod(first.shape)
-            for threshold, timeout in TIMEOUT_STEPS:
-                if total_elements <= threshold:
-                    return timeout
-    except Exception:
-        pass
-    return TIMEOUT_STEPS[-1][1]
+    # TIMEOUT_STEPS = (
+    #     (1e4, 10),
+    #     (1e5, 30),
+    #     (1e6, 90),
+    #     (1e7, 300),
+    #     (1e8, 1800),
+    #     (float("inf"), 3600),
+    # )
+    # try:
+    #     api_config = APIConfig(api_config)
+    #     first = None
+    #     if api_config.args:
+    #         first = api_config.args[0]
+    #     elif api_config.kwargs:
+    #         first = next(iter(api_config.kwargs.values()))
+    #     if first is not None and hasattr(first, "shape"):
+    #         total_elements = math.prod(first.shape)
+    #         for threshold, timeout in TIMEOUT_STEPS:
+    #             if total_elements <= threshold:
+    #                 return timeout
+    # except Exception:
+    #     pass
+    # return TIMEOUT_STEPS[-1][1]
+    return 1800
 
 
 def validate_gpu_options(options) -> tuple:
@@ -154,8 +157,10 @@ def check_gpu_memory(
 
 
 def init_worker_gpu(
-    gpu_worker_list, lock, available_gpus, max_workers_per_gpu, test_cpu
+    gpu_worker_list, lock, available_gpus, max_workers_per_gpu, options
 ):
+    if options.log_dir:
+        set_test_log_path(options.log_dir)
     set_engineV2()
     my_pid = os.getpid()
 
@@ -188,11 +193,12 @@ def init_worker_gpu(
         import paddle
         import torch
 
+        globals()["torch"] = torch
+        globals()["paddle"] = paddle
+
         from tester import (APIConfig, APITestAccuracy, APITestCINNVSDygraph,
                             APITestPaddleOnly)
 
-        globals()["torch"] = torch
-        globals()["paddle"] = paddle
         globals()["APIConfig"] = APIConfig
         globals()["APITestAccuracy"] = APITestAccuracy
         globals()["APITestCINNVSDygraph"] = APITestCINNVSDygraph
@@ -201,13 +207,16 @@ def init_worker_gpu(
         def signal_handler(*args):
             torch.cuda.empty_cache()
             paddle.device.cuda.empty_cache()
+            restore_stdio()
             sys.exit(0)
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        if test_cpu:
+        if options.test_cpu:
             paddle.device.set_device("cpu")
+
+        redirect_stdio()
 
         print(
             f"{datetime.now()} Worker PID: {my_pid}, Assigned GPU ID: {assigned_gpu}",
@@ -224,6 +233,12 @@ def run_test_case(api_config_str, options):
     """Run a single test case for the given API configuration."""
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "0")
     gpu_id = int(cuda_visible.split(",")[0])
+
+    write_to_log("checkpoint", api_config_str)
+    print(
+        f"{datetime.now()} GPU {gpu_id} {os.getpid()} test begin: {api_config_str}",
+        flush=True,
+    )
 
     pynvml.nvmlInit()
     try:
@@ -245,11 +260,6 @@ def run_test_case(api_config_str, options):
     finally:
         pynvml.nvmlShutdown()
 
-    write_to_log("checkpoint", api_config_str)
-    print(
-        f"{datetime.now()} GPU {gpu_id} {os.getpid()} test begin: {api_config_str}",
-        flush=True,
-    )
     try:
         api_config = APIConfig(api_config_str)
     except Exception as err:
@@ -268,13 +278,21 @@ def run_test_case(api_config_str, options):
     try:
         case.test()
     except Exception as err:
-        print(f"[test error] {api_config_str} {str(err)}", flush=True)
+        if "CUDA out of memory" in str(err) or "Out of memory error" in str(err):
+            os._exit(99)
+        if "CUDA error" in str(err) or "memory corruption" in str(err):
+            os._exit(1)
+        print(f"[test error] {api_config_str}: {err}", flush=True)
+        raise
     finally:
-        case.clear_tensor()
-        del case
+        del test_class, api_config, case 
+        gc.collect()
+        torch.cuda.empty_cache()
+        paddle.device.cuda.empty_cache()
 
 
 def main():
+    start_time = time.time()
     print(f"Main process id: {os.getpid()}")
     set_start_method("spawn")
 
@@ -336,7 +354,19 @@ def main():
         default=False,
         help="Whether to test CPU mode",
     )
+    parser.add_argument("--use_cached_numpy", type=bool, default=False)
+    parser.add_argument(
+        "--log_dir",
+        type=str,
+        default="",
+        help="Log directory",
+    )
     options = parser.parse_args()
+    print(f"Options: {vars(options)}", flush=True)
+
+    os.environ["USE_CACHED_NUMPY"] = str(options.use_cached_numpy)
+    if options.log_dir:
+        set_test_log_path(options.log_dir)
 
     if options.api_config:
         # Single config execution
@@ -373,7 +403,9 @@ def main():
 
             if "*" in options.api_config_file_pattern:
                 all_files = glob.glob(options.api_config_file_pattern)
-                regex_pattern = re.sub(r'\*([^*]*)$', r'\\d+\1', options.api_config_file_pattern)
+                regex_pattern = re.sub(
+                    r"\*([^*]*)$", r"\\d+\1", options.api_config_file_pattern
+                )
                 config_files = [
                     file for file in all_files if re.fullmatch(regex_pattern, file)
                 ]
@@ -385,15 +417,15 @@ def main():
                     return
             else:
                 config_files = [options.api_config_file_pattern]
-            print("\nConfig files to be tested:")
+            print("Config files to be tested:", flush=True)
             for i, config_file in enumerate(sorted(config_files), 1):
-                print(f"{i}. {config_file}")
+                print(f"{i}. {config_file}", flush=True)
         else:
             config_files = [options.api_config_file]
 
         # Batch execution
         finish_configs = read_log("checkpoint")
-        print(len(finish_configs), "cases have been tested.", flush=True)
+        print(len(finish_configs), "cases in checkpoint.", flush=True)
 
         api_config_count = 0
         api_configs = set()
@@ -427,11 +459,11 @@ def main():
         api_configs = sorted(api_configs - finish_configs)
         all_case = len(api_configs)
         fail_case = 0
-        tested_case = api_config_count - all_case
-        if tested_case:
-            print(tested_case, "cases already tested.", flush=True)
+        finish_case = api_config_count - all_case
+        if finish_case:
+            print(finish_case, "cases already tested.", flush=True)
         print(all_case, "cases will be tested.", flush=True)
-        del api_config_count, dup_case, tested_case
+        del api_config_count, dup_case, finish_case
 
         if options.num_gpus != 0 or options.gpu_ids:
             # Multi GPUs
@@ -473,7 +505,7 @@ def main():
                     lock,
                     available_gpus,
                     max_workers_per_gpu,
-                    options.test_cpu,
+                    options,
                 ],
             )
 
@@ -487,6 +519,7 @@ def main():
             signal.signal(signal.SIGTERM, cleanup_handler)
 
             try:
+                i = 0
                 for batch_start in range(0, len(api_configs), BATCH_SIZE):
                     batch = api_configs[batch_start : batch_start + BATCH_SIZE]
                     futures = {}
@@ -502,31 +535,53 @@ def main():
                     for future in as_completed(futures):
                         config = futures[future]
                         try:
+                            i += 1
+                            print(f"[{i}/{all_case}] Testing {config}", flush=True)
                             future.result()
-                        except TimeoutError as exc:
+                            print(
+                                f"[info] Test case succeeded for {config}", flush=True
+                            )
+                        except TimeoutError as err:
                             write_to_log("timeout", config)
                             print(
-                                f"[timeout] Test case timed out for {config}: {exc}",
+                                f"[error] Test case timed out for {config}: {err}",
                                 flush=True,
                             )
                             fail_case += 1
-                        except Exception as exc:
-                            write_to_log("crash", config)
+                        except ProcessExpired as err:
+                            if err.exitcode == 99:
+                                write_to_log("oom", config)
+                                print(
+                                    f"[error] CUDA out of memory for {config}",
+                                    flush=True,
+                                )
+                            else:
+                                write_to_log("crash", config)
+                                print(
+                                    f"[fatal] Worker crashed for {config}: {err}",
+                                    flush=True,
+                                )
+                            fail_case += 1
+                        except Exception as err:
                             print(
-                                f"[fatal] Worker crashed for {config}: {exc}",
+                                f"[warn] Test case failed for {config}: {err}",
                                 flush=True,
                             )
-                            fail_case += 1
-                    aggregate_logs(mkdir=True)
+                    aggregate_logs()
                 print(f"{all_case} cases tested, {fail_case} failed.", flush=True)
                 pool.close()
                 pool.join()
             except Exception as e:
                 print(f"Unexpected error: {e}", flush=True)
                 cleanup(pool)
+                total_time = time.time() - start_time
+                print(f"Test time: {round(total_time/60, 3)} minutes.", flush=True)
             finally:
-                aggregate_logs()
-                print_log_info(all_case, fail_case)
+                log_counts = aggregate_logs(end=True)
+                print_log_info(all_case, log_counts)
+                end_time = time.time()
+                total_time = end_time - start_time
+                print(f"Test time: {round(total_time/60, 3)} minutes.", flush=True)
         else:
             # Single worker
             from tester import (APIConfig, APITestAccuracy,
