@@ -112,7 +112,7 @@ class APITestAccuracy(APITestBase):
             with open('tmp/' + config_name + '_torch_out.py', 'w+') as f:
                 f.write(code_out)
 
-            print(self.gen_paddle_input())
+            self.gen_paddle_input()
             # print(self.paddle_args, self.paddle_kwargs)
             code_output = "import paddle\n"
             code_output = code_output + "def tensor_by_size(*args, **kwargs):\n"
@@ -135,7 +135,7 @@ class APITestAccuracy(APITestBase):
             for k, v in self.paddle_kwargs.items():
                 if isinstance(v, paddle.Tensor):
                     code_output = code_output + "kwargs['" + k + "']=" \
-                    + str(torch.tensor(i.numpy())).replace("tensor(", "tensor_by_size(") \
+                    + str(torch.tensor(v.numpy())).replace("tensor(", "tensor_by_size(") \
                         .replace("torch.", "paddle.") \
                     + "\n"
                 else:
