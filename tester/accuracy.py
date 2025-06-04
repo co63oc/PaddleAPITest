@@ -470,7 +470,7 @@ class APITestAccuracy(APITestBase):
                     if isinstance(paddle_out_grads[i], int):
                         self.np_assert_accuracy(numpy.array(paddle_out_grads[i]), numpy.array(torch_out_grads[i]), 1e-2, 1e-2, self.api_config)
                     elif not isinstance(paddle_out_grads[i], paddle.Tensor):
-                        print("[not compare] ", paddle_out_grads[i], torch_out_grads[i], flush=True)
+                        print("[not compare grad] ", paddle_out_grads[i], torch_out_grads[i], flush=True)
                         write_to_log("accuracy_error", self.api_config.config)
                         return
                     elif not isinstance(torch_out_grads[i], torch.Tensor):
