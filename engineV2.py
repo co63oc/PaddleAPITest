@@ -26,6 +26,9 @@ if TYPE_CHECKING:
 
 from tester.api_config.log_writer import *
 
+os.environ["FLAGS_use_system_allocator"] = "1"
+os.environ["NVIDIA_TF32_OVERRIDE"] = "0"
+
 
 def cleanup(pool):
     print(f"{datetime.now()} Cleanup started", flush=True)
@@ -116,6 +119,15 @@ def validate_gpu_options(options) -> tuple:
 
     return tuple(gpu_ids)
 
+def parse_bool(value):
+    if isinstance(value, str):
+        value = value.lower()
+        if value in ["true", "1", "yes", "y"]:
+            return True
+        elif value in ["false", "0", "no", "n"]:
+            return False
+    else:
+        raise ValueError(f"Invalid boolean value: {value} parsed from command line")
 
 def check_gpu_memory(
     gpu_ids, num_workers_per_gpu, required_memory
@@ -285,7 +297,7 @@ def run_test_case(api_config_str, options):
         print(f"[test error] {api_config_str}: {err}", flush=True)
         raise
     finally:
-        del test_class, api_config, case 
+        del test_class, api_config, case
         gc.collect()
         torch.cuda.empty_cache()
         paddle.device.cuda.empty_cache()
@@ -310,19 +322,27 @@ def main():
     )        
     parser.add_argument(
         "--paddle_only",
+        type=parse_bool,
         default=False,
+        help="test paddle api only to figure out whether the api is supported",
     )
     parser.add_argument(
         "--paddle_cinn",
+        type=parse_bool,
         default=False,
+        help="test paddle api in dynamic graph mode and cinn mode",
     )
     parser.add_argument(
         "--accuracy",
+        type=parse_bool,
         default=False,
+        help="test paddle api to corespoding torch api",
     )
     parser.add_argument(
         "--test_amp",
+        type=parse_bool,
         default=False,
+        help="Whether to test in auto mixed precision (AMP) mode",
     )
     parser.add_argument(
         "--num_gpus",
@@ -350,7 +370,7 @@ def main():
     )
     parser.add_argument(
         "--test_cpu",
-        type=bool,
+        type=parse_bool,
         default=False,
         help="Whether to test CPU mode",
     )
