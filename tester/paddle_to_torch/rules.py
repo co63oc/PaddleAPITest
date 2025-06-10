@@ -134,31 +134,6 @@ class BaseRule(ABC):
         """
         pass
 
-    @classmethod
-    def _format_arg(cls, arg) -> str:
-        """
-        将参数格式化为调用字符串的辅助方法
-
-        Args:
-            arg: 待格式化的参数
-
-        Returns:
-            str: 格式化后的参数
-        """
-        PLACEHOLDER_PATTERN: re.Pattern = re.compile(r"\{([^{}]+)\}")
-
-        def replacer(match):
-            placeholder = match.group(1)
-            if placeholder.isdigit():
-                return f"_tmp_{placeholder}"
-            elif placeholder.replace("_", "").isalnum():
-                return placeholder
-            return match.group(0)
-
-        if isinstance(arg, str):
-            arg = PLACEHOLDER_PATTERN.sub(replacer, arg)
-        return str(arg)
-
     def read_mapping(self, mapping: Dict):
         """
         预处理，根据传入的 json 配置初始化成员变量
@@ -198,13 +173,13 @@ class BaseRule(ABC):
             args = self.mapping.get("torch_args", [])
             map_code.append("_args = []")
             for arg in args:
-                map_code.append(f"_args.extend([{self._format_arg(arg)}])")
+                map_code.append(f"_args.extend([{str(arg)}])")
         if "torch_kwargs" in self.mapping or "paddle_torch_args_map" in self.mapping:
             map_code.append("_kwargs = {}")
         if "torch_kwargs" in self.mapping:
             kwargs = self.mapping.get("torch_kwargs", {})
             for key, value in kwargs.items():
-                map_code.append(f"_kwargs['{key}'] = {self._format_arg(value)}")
+                map_code.append(f"_kwargs['{key}'] = {str(value)}")
         if "paddle_torch_args_map" in self.mapping:
             args_map = self.mapping.get("paddle_torch_args_map", {})
             map_code.append("for paddle_param, torch_param in {")
@@ -244,11 +219,11 @@ class GenericRule(BaseRule):
             pre.append("_args = []")
         if self.torch_args:
             for arg in self.torch_args:
-                pre.append(f"_args.extend([{self._format_arg(arg)}])")
+                pre.append(f"_args.extend([{str(arg)}])")
         pre.append("_kwargs = {}")
         if self.torch_kwargs:
             for key, value in self.torch_kwargs.items():
-                pre.append(f"_kwargs['{key}'] = {self._format_arg(value)}")
+                pre.append(f"_kwargs['{key}'] = {str(value)}")
         if self.args_map:
             pre.append("for paddle_param, torch_param in {")
             for paddle_param, torch_param in self.args_map.items():
@@ -428,7 +403,7 @@ elif (isinstance(axis, (list, tuple)) and len(axis) == 0) and not keepdim:
         code = Code(
             preprocess=defaults_code + map_code + pre.splitlines(),
             core=core.splitlines(),
-            postprocess = post.splitlines(),
+            postprocess=post.splitlines(),
         )
         return ConvertResult.success(paddle_api, code)
 
@@ -884,7 +859,6 @@ if axis == None:
     x = x.flatten()
 if not isinstance(axis, int) and axis != None:
     axis = int(axis)
-x_dtype = x.dtype
 """
         post = ""
         if paddle_api == "paddle.cumsum":
@@ -896,9 +870,6 @@ x_dtype = x.dtype
             post = "result = x"
         else:
             return ConvertResult.error(paddle_api, f"Unsupported api: {paddle_api}")
-        post += """
-result = result.to(x_dtype)
-"""
         code = Code(
             preprocess=defaults_code + pre.splitlines() + map_code,
             core=[core],
@@ -1461,7 +1432,7 @@ restore_ind = torch.empty(fpn_rois.shape[0], 1)
 rois_num_per_level = []
 for i in range(num_level):
     rois_num_per_level.append(
-        torch.zeros([rois_num.numel()])
+        torch.zeros([rois_num.numel()]).to(torch.int32)
     )
 # 计算结果
 index = 0
@@ -1487,7 +1458,7 @@ for i in range(num_level):
             restore_ind[j] = index
             index += 1
 
-result = (multi_rois, restore_ind, rois_num_per_level)
+result = (multi_rois, restore_ind.to(torch.int32), rois_num_per_level)
 """
         code = Code(core=core.splitlines())
         return ConvertResult.success(paddle_api, code, is_torch_corresponding=False)
@@ -4647,10 +4618,10 @@ elif isinstance(shape, tuple):
     shape = list(shape)
 elements = x.numel()
 for i, s in enumerate(shape):
-    if s == 0:
+    if s == 0 and elements != 0:
         shape[i] = x.shape[i]
         elements = elements // x.shape[i]
-    elif s != -1:
+    elif s != -1 and s != 0:
         elements = elements // s
 for i, s in enumerate(shape):
     if s == -1:
@@ -5858,8 +5829,8 @@ class UniqueRule(BaseRule):
         defaults_code, map_code = self.apply_generic()
         core = f"result = {self.torch_api}(**_kwargs)"
         post = """
-result = list(result)
 if dtype is not None:
+    result = list(result)
     if return_inverse:
         result[1] = result[1].to(dtype=dtype)
         if result[1].ndim == 0:
@@ -5869,6 +5840,7 @@ if dtype is not None:
             result[2] = result[2].to(dtype=dtype)
         else:
             result[1] = result[1].to(dtype=dtype)
+result = tuple(result)
 """
         code = Code(
             preprocess=defaults_code + map_code,
@@ -5880,16 +5852,13 @@ if dtype is not None:
 
 class UnflattenRule(BaseRule):
     def apply(self, paddle_api: str) -> ConvertResult:
-        defaults_code, map_code = self.apply_generic()
+        _, map_code = self.apply_generic()
         pre = """
-sh = []
-if isinstance(_kwargs['sizes'],torch.Tensor):
-    for i in _kwargs['sizes']:
-        sh.append(i.item())
-    _kwargs['sizes'] = sh
+shape = list(shape.tolist() if isinstance(shape, torch.Tensor) else shape)
+shape = tuple(x.item() if isinstance(x, torch.Tensor) else x for x in shape)
 """
         core = f"result = {self.torch_api}(**_kwargs)"
-        code = Code(preprocess=map_code + pre.splitlines(), core=core.splitlines())
+        code = Code(preprocess=pre.splitlines() + map_code, core=[core])
         return ConvertResult.success(paddle_api, code)
 
 
