@@ -76,9 +76,10 @@ def main():
         torch.cuda.empty_cache()
         paddle.device.cuda.empty_cache()
     elif options.api_config_file != "":
-        finish_configs = read_log("checkpoint")
+        filter = options.filter
+        if not filter:
+            finish_configs = read_log("checkpoint")
         with open(options.api_config_file, "r") as f:
-            filter = options.filter
             def check_filter(line, filter):
                 filter_list = filter.split(",")
                 for i in filter_list:
@@ -89,7 +90,8 @@ def main():
                 api_configs = set(line.strip() for line in f if line.strip() and check_filter(line, filter))   
             else:
                 api_configs = set(line.strip() for line in f if line.strip())
-        api_configs = api_configs - finish_configs
+        if not filter:
+            api_configs = api_configs - finish_configs
         api_configs = sorted(api_configs)
         for api_config_str in api_configs:
             write_to_log("checkpoint", api_config_str)

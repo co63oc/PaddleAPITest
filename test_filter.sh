@@ -1,4 +1,4 @@
-rm -vf ./tester/api_config/test_log/checkpoint.txt
+# rm -vf ./tester/api_config/test_log/checkpoint.txt
 
 echo $1
 # echo "accuracy"
