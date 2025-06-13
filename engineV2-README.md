@@ -31,39 +31,41 @@
    ```
 3. 确保 `engineV2.py` 、 `log_writer.py` 和 `run.sh` 路径正确
 
-> [!NOTE]
-> 目前 engineV2 仅支持 python>=3.10，如报错 *`NameError: name 'torch' is not defined`*，请在 run_test_case() 函数首行手动添加导入语句：
+> [!CAUTION]
+> 目前 engineV2 仅支持 ***python>=3.10***，如报错 *`NameError: name 'torch' is not defined`*，请在 `run_test_case()` 函数首行手动添加导入语句：
 > ```python
 > import torch
 > import paddle
-> from tester import (
->     APIConfig,
->     APITestAccuracy,
->     APITestCINNVSDygraph,
->     APITestPaddleOnly,
-> )
+> from tester import (APIConfig, APITestAccuracy, APITestCINNVSDygraph,
+>                     APITestPaddleOnly)
 > ```
+> 
+> 问题的原因在于：多进程的 **spawn** 启动方法（start method）与旧版 Python 中函数序列化 (pickling) 存在机制缺陷
+> 
+> 在 Python 3.10 之前的版本中，当子进程的执行函数（如 `run_test_case`）在主进程中被定义并通过序列化传递到子进程时，该函数会试图在其原始定义时的全局命名空间（即主进程的全局命名空间）中寻找依赖项（如 `torch`），而不是在当前执行时的全局命名空间（即已经通过 `init_worker_gpu` 初始化过的子进程命名空间）中寻找
+> 
+> 由于 gpu 隔离的需求，主进程并没有导入 `torch` 和 `paddle`，所以当 `run_test_case` 在子进程中被反序列化并准备执行时，它找不到这些库，从而引发 `NameError`
 
 ## 使用指南
 
 ### 命令行参数
 
-| 参数                        | 类型  | 说明                                                                 |
-| --------------------------- | ----- | -------------------------------------------------------------------- |
-| `--api_config`              | str   | API 配置字符串（单条测试）                                           |
-| `--api_config_file`         | str   | API 配置文件路径（如`tester/api_config/5_accuracy/accuracy_1.txt`）  |
-| `--api_config_file_pattern` | str   | API 配置文件模式（如 `tester/api_config/5_accuracy/accuracy_*.txt`） |
-| `--paddle_only`             | bool  | 运行 Paddle 测试（默认 False）                                       |
-| `--accuracy`                | bool  | 运行 Paddle vs Torch 精度测试（默认 False）                          |
-| `--paddle_cinn`             | bool  | 运行 CINN vs Dygraph 对比测试（默认 False）                          |
-| `--num_gpus`                | int   | 使用的 GPU 数量（默认 0，-1 动态最大）                               |
-| `--num_workers_per_gpu`     | int   | 每 GPU 的 worker 进程数（默认 1，-1 动态最大）                       |
-| `--gpu_ids`                 | str   | 使用的 GPU 序号，以逗号分隔（默认 ""，"-1" 动态最大）                |
-| `--required_memory`         | float | 每 worker 进程预估使用显存 GB（默认 10.0）                           |
-| `--test_amp`                | bool  | 启用自动混合精度测试（默认 False）                                   |
-| `--test_cpu`                | bool  | 启用 Paddle CPU 模式测试（默认 False）                               |
-| `--use_cached_numpy`        | bool  | 启用 Numpy 缓存（默认 False）                                        |
-| `--log_dir`                 | str   | 日志输出路径（默认 "tester/api_config/test_log"）                    |
+| 参数                        | 类型  | 说明                                                                                   |
+| --------------------------- | ----- | -------------------------------------------------------------------------------------- |
+| `--api_config`              | str   | API 配置字符串（单条测试）                                                             |
+| `--api_config_file`         | str   | API 配置文件路径（如`tester/api_config/5_accuracy/accuracy_1.txt`）                    |
+| `--api_config_file_pattern` | str   | API 配置文件 glob 模式，以逗号分隔（如 `tester/api_config/5_accuracy/accuracy_*.txt`） |
+| `--paddle_only`             | bool  | 运行 Paddle 测试（默认 False）                                                         |
+| `--accuracy`                | bool  | 运行 Paddle vs Torch 精度测试（默认 False）                                            |
+| `--paddle_cinn`             | bool  | 运行 CINN vs Dygraph 对比测试（默认 False）                                            |
+| `--num_gpus`                | int   | 使用的 GPU 数量（默认 -1，-1 动态最大）                                                |
+| `--num_workers_per_gpu`     | int   | 每 GPU 的 worker 进程数（默认 1，-1 动态最大）                                         |
+| `--gpu_ids`                 | str   | 使用的 GPU 序号，以逗号分隔（默认 ""，"-1" 动态最大）                                  |
+| `--required_memory`         | float | 每 worker 进程预估使用显存 GB（默认 10.0）                                             |
+| `--test_amp`                | bool  | 启用自动混合精度测试（默认 False）                                                     |
+| `--test_cpu`                | bool  | 启用 Paddle CPU 模式测试（默认 False）                                                 |
+| `--use_cached_numpy`        | bool  | 启用 Numpy 缓存（默认 False）                                                          |
+| `--log_dir`                 | str   | 日志输出路径（默认 "tester/api_config/test_log"）                                      |
 
 ### 示例命令
 
@@ -71,18 +73,25 @@
 
 **多 GPU 多进程模式**：
 ```bash
-python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_config_tmp.txt" --num_gpus=8 --num_workers_per_gpu=-1 >> "tester/api_config/test_log/log.log" 2>&1
+python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_config_tmp.txt" >> "tester/api_config/test_log/log.log" 2>&1
+```
+
+```bash
+python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_config_tmp.txt" --num_gpus=4 --num_workers_per_gpu=2 --gpu_ids="4,5,6,7" >> "tester/api_config/test_log/log.log" 2>&1
 ```
 
 **多 GPU 单进程模式**：
 ```bash
-python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_config_tmp.txt" --num_gpus=8 >> "tester/api_config/test_log/log.log" 2>&1
+python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_config_tmp.txt" --num_gpus=2 >> "tester/api_config/test_log/log.log" 2>&1
+```
+
+```bash
+python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_config_tmp.txt" --gpu_ids="0,1" >> "tester/api_config/test_log/log.log" 2>&1
 ```
 
 **单 GPU 单进程模式**：
 ```bash
-export CUDA_VISIBLE_DEVICES="0"
-python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_config_tmp.txt" --num_gpus=0 >> "tester/api_config/test_log/log.log" 2>&1
+python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_config_tmp.txt" --num_gpus=1 --gpu_ids="7" >> "tester/api_config/test_log/log.log" 2>&1
 ```
 
 **使用 run.sh 脚本**：
@@ -90,14 +99,15 @@ python engineV2.py --accuracy=True --api_config_file="tester/api_config/api_conf
 # chmod +x run.sh
 ./run.sh
 ```
-该脚本使用参数：NUM_GPUS=-1, NUM_WORKERS_PER_GPU=-1，在后台运行程序，可在修改 `run.sh` 参数后使用
+该脚本使用参数：`NUM_GPUS=-1, NUM_WORKERS_PER_GPU=-1, GPU_IDS="4,5,6,7"`，在后台运行程序，可在修改 `run.sh` 参数后使用
 
 ## 监控方法
 
 执行 `run.sh` 后可通过以下方式监控：
 
 - **GPU使用情况**：`watch -n 1 nvidia-smi`
-- **日志文件**：`ls -lh tester/api_config/test_log`
+- **日志目录**：`ls -lh tester/api_config/test_log`
+- **详细日志**：`tail -f tester/api_config/test_log/log.log`
 - **终止进程**：`kill <PYTHON_PID>`（PID 由 run.sh 显示）
 - **进程情况**：`watch -n 1 nvidia-smi --query-compute-apps=pid,process_name,used_memory,gpu_uuid --format=csv`
 
