@@ -467,7 +467,8 @@ def main():
             print(dup_case, "cases are duplicates and removed.", flush=True)
 
         api_config_count = len(api_configs)
-        api_configs = sorted(api_configs - finish_configs)
+        # api_configs = sorted(api_configs - finish_configs)
+        api_configs = sorted(api_configs)
         all_case = len(api_configs)
         fail_case = 0
         finish_case = api_config_count - all_case
