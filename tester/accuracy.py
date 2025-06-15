@@ -124,7 +124,10 @@ class APITestAccuracy(APITestBase):
             code_output = code_output + "            return paddle.to_tensor(args[0])\n"
             code_output = code_output + "        else:\n"            
             code_output = code_output + "            return paddle.to_tensor(args[0], dtype=kwargs['dtype'])\n"
-            code_output = code_output + "    return paddle.randn(kwargs['size'], dtype=kwargs['dtype'])\n"
+            code_output = code_output + "    if 'dtype' not in kwargs:\n"
+            code_output = code_output + "        return paddle.randn(kwargs['size'])\n"
+            code_output = code_output + "    else:\n"
+            code_output = code_output + "        return paddle.randn(kwargs['size'], dtype=kwargs['dtype'])\n"
             code_output = code_output + "args = []\nkwargs = {}\n"
             for i in self.paddle_args:
                 if isinstance(i, paddle.Tensor):
