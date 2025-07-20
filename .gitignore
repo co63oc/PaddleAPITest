@@ -1,6 +1,8 @@
+tmp/
 log.log
 __pycache__
 tester/api_config/**/test_log*
 .vscode
 .mypy_cache
 run.sh
+paddle.*

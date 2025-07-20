@@ -1,0 +1,1 @@
+paddle.nn.functional.conv3d(Tensor([4, 1, 2, 2, 2],"float32"), Tensor([2, 1, 0, 1, 1],"float32"), None, padding="valid", stride=1, dilation=1, groups=1, data_format="NCDHW", )

@@ -333,6 +333,10 @@ def main():
     )
     parser.add_argument("--api_config", default="")
     parser.add_argument(
+        '--filter',
+        default="",
+    )        
+    parser.add_argument(
         "--paddle_only",
         type=parse_bool,
         default=False,
@@ -526,7 +530,17 @@ def main():
         for config_file in config_files:
             try:
                 with open(config_file, "r") as f:
-                    lines = [line.strip() for line in f if line.strip()]
+                    filter = options.filter
+                    def check_filter(line, filter):
+                        filter_list = filter.split(",")
+                        for i in filter_list:
+                            if i in line:
+                                return True
+                        return False
+                    if filter:
+                        lines = [line.strip() for line in f if line.strip() and check_filter(line, filter)]   
+                    else:
+                        lines = [line.strip() for line in f if line.strip()]
                     api_config_count += len(lines)
                     api_configs.update(lines)
             except Exception as e:
@@ -538,7 +552,8 @@ def main():
             print(dup_case, "cases are duplicates and removed.", flush=True)
 
         api_config_count = len(api_configs)
-        api_configs = sorted(api_configs - finish_configs)
+        # api_configs = sorted(api_configs - finish_configs)
+        api_configs = sorted(api_configs)
         all_case = len(api_configs)
         fail_case = 0
         finish_case = api_config_count - all_case

@@ -9,7 +9,8 @@ import torch
 from .api_config.log_writer import write_to_log
 from .base import APITestBase
 from .paddle_to_torch import get_converter
-
+import os
+import pickle
 
 class APITestAccuracy(APITestBase):
     def __init__(self, api_config, **kwargs):
@@ -56,6 +57,11 @@ class APITestAccuracy(APITestBase):
             write_to_log("numpy_error", self.api_config.config)
             return
 
+        char_list = ".,()[] \"="
+        config_name = self.api_config.config
+        for ch in char_list:
+            config_name = config_name.replace(ch, "_")
+        config_name = self.api_config.api_name[self.api_config.api_name.rindex(".")+1:]
         try:
             device = torch.device("cuda:0")
             torch.set_default_device(device)
@@ -74,6 +80,94 @@ class APITestAccuracy(APITestBase):
                 "result": None,
                 **self.torch_kwargs,
             }
+        
+            # print(self.torch_args, self.torch_kwargs)
+            code = convert_result.code
+            code_out = "import torch\nfrom collections import OrderedDict\n"
+            code_out = code_out + "def tensor_by_size(*args, **kwargs):\n"
+            code_out = code_out + "    if 'size' not in kwargs:\n"
+            code_out = code_out + "        if 'dtype' not in kwargs:\n"
+            code_out = code_out + "            return torch.tensor(args[0])\n"
+            code_out = code_out + "        else:\n"            
+            code_out = code_out + "            return torch.tensor(args[0], dtype=kwargs['dtype'])\n"
+            code_out = code_out + "    if 'dtype' not in kwargs:\n"
+            code_out = code_out + "        return torch.randn(kwargs['size'])\n"
+            code_out = code_out + "    else:\n"
+            code_out = code_out + "        return torch.randn(kwargs['size']).type(kwargs['dtype'])\n"
+            code_out = code_out + ("args = " + str(self.torch_args)) + "\n"
+            code_out = code_out + ("kwargs = " +  str(self.torch_kwargs)).replace("tensor(", "tensor_by_size(") + "\n"
+            code_out = code_out + ("result = " +  str(None)) + "\n"
+            for k, v in self.torch_kwargs.items():
+                code_out = code_out + f'{k} = {v}'.replace("tensor(", "tensor_by_size(") + "\n"
+            code_out = code_out + "# preprocess\n"
+            for i in code.preprocess:
+                code_out = code_out + i + "\n"
+            code_out = code_out + "# core\n"
+            for i in code.core:
+                code_out = code_out + i + "\n"
+            code_out = code_out + "# postprocess\n"
+            for i in code.postprocess:
+                code_out = code_out + i + "\n"
+            code_out = code_out + "print(result)\n"
+            if os.getenv("TEST_NOT_WRITE_CODE", "0") == "0":
+                with open('tmp/code/' + config_name + '_torch.py', 'w+') as f:
+                    f.write(code_out)
+                pickle.dump(self.torch_args, open('tmp/data/' + config_name + '_torch_args.pkl', 'wb'))
+                pickle.dump(self.torch_kwargs, open('tmp/data/' + config_name + '_torch_kwargs.pkl', 'wb'))
+
+            self.gen_paddle_input()
+            # print(self.paddle_args, self.paddle_kwargs)
+            code_output = "import paddle\n"
+            code_output = code_output + "def tensor_by_size(*args, **kwargs):\n"
+            code_output = code_output + "    if 'size' not in kwargs:\n"
+            code_output = code_output + "        if 'dtype' not in kwargs:\n"
+            code_output = code_output + "            return paddle.to_tensor(args[0])\n"
+            code_output = code_output + "        else:\n"            
+            code_output = code_output + "            return paddle.to_tensor(args[0], dtype=kwargs['dtype'])\n"
+            code_output = code_output + "    if 'dtype' not in kwargs:\n"
+            code_output = code_output + "        return paddle.randn(kwargs['size'])\n"
+            code_output = code_output + "    else:\n"
+            code_output = code_output + "        return paddle.randn(kwargs['size']).astype(dtype=kwargs['dtype'])\n"
+            code_output = code_output + "args = []\nkwargs = {}\n"
+            for i in self.paddle_args:
+                if isinstance(i, paddle.Tensor):
+                    code_output = code_output + "args.append(" + \
+                        str(torch.tensor(i.numpy())).replace("tensor(", "tensor_by_size(") \
+                        .replace("torch.", "paddle.") \
+                    + ")\n"
+                else:
+                    code_output = code_output + "args.append(" + str(i) + ")\n"
+            
+            for k, v in self.paddle_kwargs.items():
+                if isinstance(v, paddle.Tensor):
+                    code_output = code_output + "kwargs['" + k + "']=" \
+                    + str(torch.tensor(v.numpy())).replace("tensor(", "tensor_by_size(") \
+                        .replace("torch.", "paddle.") \
+                    + "\n"
+                else:
+                    code_output = code_output + "kwargs['" + k + "']=" + str(v) + "\n"
+            code_output = code_output + "result = " + \
+                    str(self.api_config.api_name) \
+                    .replace("paddle.Tensor", "paddle") + "(*args, **kwargs)\n" \
+                        + "print(result)\n"
+            if os.getenv("TEST_NOT_WRITE_CODE", "0") == "0":
+                with open('tmp/code/' + config_name + '_paddle.py', 'w+') as f:
+                    f.write(code_output)
+                out_args = []
+                for i in self.paddle_args:
+                    if isinstance(i, paddle.Tensor):
+                        out_args.append(i.numpy())
+                    else:
+                        out_args.append(i)
+                out_kwargs = {}
+                for k, v in self.paddle_kwargs.items():
+                    if isinstance(v, paddle.Tensor):
+                        out_kwargs[k] = v.numpy()
+                    else:
+                        out_kwargs[k] = v
+                pickle.dump(out_args, open('tmp/data/' + config_name + '_paddle_args.pkl', 'wb'))
+                pickle.dump(out_kwargs, open('tmp/data/' + config_name + '_paddle_kwargs.pkl', 'wb'))
+    
             if self.api_config.api_name == "paddle.nn.functional.rnnt_loss":
                 if paddle.device.get_device() == "cpu":
                     exec_locals["fused_log_softmax"] = False
@@ -81,6 +175,7 @@ class APITestAccuracy(APITestBase):
             # convert_result.is_torch_corresponding 为 True 时代表有对应的 Torch API
             # 执行 *_compiled 编译好的代码速度更快，定位 compile error 时可删去 _compiled
             code = convert_result.code
+
             if code.preprocess_compiled:
                 exec(code.preprocess_compiled, exec_globals, exec_locals)
 
@@ -199,6 +294,15 @@ class APITestAccuracy(APITestBase):
             if not self.gen_paddle_input():
                 print("gen_paddle_input failed")
                 return
+           # paddle.device.empty_cache()
+            if self.api_config.api_name == "paddle.vision.ops.deform_conv2d":
+                # Ensure mask is after weight
+                if "weight" in self.paddle_kwargs and "mask" in self.paddle_kwargs:
+                    mask = self.paddle_kwargs["mask"]
+                    del self.paddle_kwargs["mask"]
+                    self.paddle_kwargs["mask"] = mask
+            if self.api_config.api_name == "paddle.nn.functional.cross_entropy":
+                self.paddle_kwargs['use_softmax'] = True
             if "paddle.Tensor." in self.api_config.api_name:
                 api = getattr(self.paddle_args[0], self.api_config.api_name[self.api_config.api_name.rindex(".")+1:])
                 if self.test_amp:
@@ -282,10 +386,19 @@ class APITestAccuracy(APITestBase):
                     if paddle_output.dtype == paddle.bfloat16:
                         paddle_output = paddle.cast(paddle_output, dtype="float32")
                         torch_output = torch_output.to(dtype=torch.float32)
-                    # self.np_assert_accuracy(paddle_output.numpy(), torch_output.numpy(), atol=self.atol, rtol=self.rtol)
-                    self.torch_assert_accuracy(paddle_output, torch_output, atol=self.atol, rtol=self.rtol)
+                    self.np_assert_accuracy(paddle_output.numpy(), torch_output.numpy(), atol=self.atol, rtol=self.rtol)
+                    # atol = self.atol
+                    # rtol = self.rtol
+                    # if self.api_config.api_name == "paddle.add_n":
+                    #     input_list_len = len(self.paddle_args[0])
+                    #     if input_list_len > 0:
+                    #         input_list_first = self.paddle_args[0][0]
+                    #         if paddle.device.get_device() == "cpu" and input_list_first.dtype == paddle.float16:
+                    #             atol = input_list_len * atol
+                    #             rtol = input_list_len * rtol
+                    # self.torch_assert_accuracy(paddle_output, torch_output, atol=atol, rtol=rtol)
                 except Exception as err:
-                    print("[accuracy error]", self.api_config.config, "\n", str(err), flush=True)
+                    print("[accuracy error] out 1", self.api_config.config, "\n", str(err), flush=True)
                     write_to_log("accuracy_error", self.api_config.config)
                     return
             elif isinstance(torch_output, bool):
@@ -294,7 +407,7 @@ class APITestAccuracy(APITestBase):
                     assert paddle_output.shape == [], "paddle_output shape is not []"
                     assert bool(paddle_output) == torch_output, f"paddle_output{bool(paddle_output)} is not equal to torch_output{torch_output}"
                 except Exception as err:
-                    print("[accuracy error]", self.api_config.config, "\n", str(err), flush=True)
+                    print("[accuracy error] out 2", self.api_config.config, "\n", str(err), flush=True)
                     write_to_log("accuracy_error", self.api_config.config)
                     return
             elif isinstance(torch_output, (torch.return_types.max, torch.return_types.min)):
@@ -347,7 +460,7 @@ class APITestAccuracy(APITestBase):
                             # self.np_assert_accuracy(item_paddle.numpy(), item_torch.cpu().detach().numpy(), atol=self.atol, rtol=self.rtol)
                             self.torch_assert_accuracy(item_paddle, item_torch, atol=self.atol, rtol=self.rtol)
                     except Exception as err:
-                        print("[accuracy error]", self.api_config.config, "\n", str(err), flush=True)
+                        print("[accuracy error] 447 ", self.api_config.config, "\n", str(err), flush=True)
                         write_to_log("accuracy_error", self.api_config.config)
                         return                    
                 else:
@@ -435,6 +548,7 @@ class APITestAccuracy(APITestBase):
                 "paddle.combinations",
                 "paddle.nn.utils.parameters_to_vector",
                 "paddle.cdist",
+                "paddle.vander",
             }:
                 paddle_out_grads = []
                 torch_out_grads = []
@@ -448,11 +562,11 @@ class APITestAccuracy(APITestBase):
                         # self.np_assert_accuracy(paddle_out_grads.numpy(), torch_out_grads.numpy(), atol=self.atol, rtol=self.rtol)
                         self.torch_assert_accuracy(paddle_out_grads, torch_out_grads, atol=self.atol, rtol=self.rtol)
                     except Exception as err:
-                        print("[accuracy error] backward ", self.api_config.config, "\n", str(err), flush=True)
+                        print("[accuracy error] backward 1 ", self.api_config.config, "\n", str(err), flush=True)
                         write_to_log("accuracy_error", self.api_config.config)
                         return
                 else:
-                    print("[accuracy error] backward ", self.api_config.config, "\n[output type diff error1], ", type(torch_out_grads), flush=True)
+                    print("[accuracy error] backward 2 ", self.api_config.config, "\n[output type diff error1], ", type(torch_out_grads), flush=True)
                     write_to_log("accuracy_error", self.api_config.config)
                     return
             elif isinstance(paddle_out_grads, (list, tuple)):
@@ -464,18 +578,18 @@ class APITestAccuracy(APITestBase):
                 if isinstance(torch_out_grads, tuple):
                     torch_out_grads = list(torch_out_grads)
                 if len(paddle_out_grads) != len(torch_out_grads):
-                    print("[accuracy error] backward ", self.api_config.config, "\n[output type diff error2], ", len(paddle_out_grads), len(torch_out_grads), flush=True)
+                    print("[accuracy error] backward 3 ", self.api_config.config, "\n[output type diff error2], ", len(paddle_out_grads), len(torch_out_grads), flush=True)
                     write_to_log("accuracy_error", self.api_config.config)
                     return
                 for i in range(len(paddle_out_grads)):
                     if isinstance(paddle_out_grads[i], int):
                         self.np_assert_accuracy(numpy.array(paddle_out_grads[i]), numpy.array(torch_out_grads[i]), atol=self.atol, rtol=self.rtol)
                     elif not isinstance(paddle_out_grads[i], paddle.Tensor):
-                        print("[not compare] ", paddle_out_grads[i], torch_out_grads[i], flush=True)
+                        print("[not compare grad] ", paddle_out_grads[i], torch_out_grads[i], flush=True)
                         write_to_log("accuracy_error", self.api_config.config)
                         return
                     elif not isinstance(torch_out_grads[i], torch.Tensor):
-                        print("[accuracy error] backward ", self.api_config.config, "\n[output type diff error3], ", type(torch_out_grads[i]), flush=True)
+                        print("[accuracy error] backward 4", self.api_config.config, "\n[output type diff error3], ", type(torch_out_grads[i]), flush=True)
                         write_to_log("accuracy_error", self.api_config.config)
                         return
                     else:
@@ -486,7 +600,7 @@ class APITestAccuracy(APITestBase):
                             # self.np_assert_accuracy(paddle_out_grads[i].numpy(), torch_out_grads[i].numpy(), atol=self.atol, rtol=self.rtol)
                             self.torch_assert_accuracy(paddle_out_grads[i], torch_out_grads[i], atol=self.atol, rtol=self.rtol)
                         except Exception as err:
-                            print("[accuracy error] backward ", self.api_config.config, "\n", str(err), flush=True)
+                            print("[accuracy error] backward 5 ", self.api_config.config, "\n", str(err), flush=True)
                             write_to_log("accuracy_error", self.api_config.config)
                             return
 
