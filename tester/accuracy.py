@@ -153,18 +153,19 @@ class APITestAccuracy(APITestBase):
             if os.getenv("TEST_NOT_WRITE_CODE", "0") == "0":
                 with open('tmp/code/' + config_name + '_paddle.py', 'w+') as f:
                     f.write(code_output)
-                out_args = []
-                for i in self.paddle_args:
-                    if isinstance(i, paddle.Tensor):
-                        out_args.append(i.numpy())
+                def convert_to_numpy(obj):
+                    if isinstance(obj, paddle.Tensor):
+                        return obj.numpy()
+                    elif isinstance(obj, (list, tuple)):
+                        return [convert_to_numpy(x) for x in obj]
+                    elif isinstance(obj, dict):
+                        return {k: convert_to_numpy(v) for k, v in obj.items()}
                     else:
-                        out_args.append(i)
-                out_kwargs = {}
-                for k, v in self.paddle_kwargs.items():
-                    if isinstance(v, paddle.Tensor):
-                        out_kwargs[k] = v.numpy()
-                    else:
-                        out_kwargs[k] = v
+                        return obj
+
+                out_args = convert_to_numpy(self.paddle_args)
+                out_kwargs = convert_to_numpy(self.paddle_kwargs)
+                
                 pickle.dump(out_args, open('tmp/data/' + config_name + '_paddle_args.pkl', 'wb'))
                 pickle.dump(out_kwargs, open('tmp/data/' + config_name + '_paddle_kwargs.pkl', 'wb'))
     
