@@ -18,7 +18,10 @@ ret = open_f(f"tmp/data/{api_name}_{framework}_kwargs.pkl")
 if isinstance(ret, dict):
     for k, v in ret.items():
         if isinstance(v, np.ndarray):
-            v = paddle.to_tensor(v)
+            if framework == "paddle":
+                v = paddle.to_tensor(v)
+            if framework == "torch":
+                v = torch.from_numpy(v)
         ret[k] = v
     kwargs = ret
 
@@ -26,7 +29,10 @@ ret = open_f(f"tmp/data/{api_name}_{framework}_args.pkl")
 if isinstance(ret, list):
     for i, v in enumerate(ret):
         if isinstance(v, np.ndarray):
-            v = paddle.to_tensor(v)
+            if framework == "paddle":
+                v = paddle.to_tensor(v)
+            if framework == "torch":
+                v = torch.from_numpy(v)
             ret[i] = v
     args = ret
 
