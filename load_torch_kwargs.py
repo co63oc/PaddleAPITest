@@ -6,8 +6,15 @@ def open_f(f):
     a = pickle.load(open(f, 'rb'))
     return a
 
-api_name = "conv2d"
-framework = "paddle"
+import os
+current_file = os.path.basename(__file__)
+name_without_extension = current_file[:-3]
+parts = name_without_extension.split("_")
+framework = parts[-1]
+api_name = "_".join(parts[:-1])
+
+# api_name = "conv2d"
+# framework = "paddle"
 
 if framework == "paddle":
     import paddle
@@ -36,7 +43,4 @@ if isinstance(ret, list):
             ret[i] = v
     args = ret
 
-# print(locals())
-# ret = open_f("tmp/code/_paddle_args.pkl")
-# print(paddle.to_tensor(ret[0]))
-# ret = open_f("tmp/code/_paddle_kwargs.pkl")
+
