@@ -101,3 +101,4 @@ paddle.Tensor.__getitem__
 paddle.Tensor.logit
 paddle.unique_consecutive
 paddle.var
+paddle.linalg.lu_unpack
