@@ -74,3 +74,4 @@ paddle.unique_consecutive
 paddle.vander
 paddle.var
 paddle.vision.ops.deform_conv2d
+paddle.linalg.lu_unpack
